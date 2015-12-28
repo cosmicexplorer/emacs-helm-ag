@@ -1140,7 +1140,7 @@ through `helm-ag--disabled-advices-alist'."
   (remove-hook 'helm-update-hook #'helm-ag--refresh-listing-overlays)
   (remove-hook 'helm-after-update-hook #'helm-ag--display-preview))
 (defun helm-ag--delete-temporaries ()
-  (delete-overlay helm-ag--preview-overlay)
+  (when helm-ag--preview-overlay (delete-overlay helm-ag--preview-overlay))
   (cl-loop for buf in helm-ag--buffers-displayed
            do (with-current-buffer buf
                 (cl-loop for olay in helm-ag--process-preview-overlays
@@ -1156,6 +1156,7 @@ through `helm-ag--disabled-advices-alist'."
   "Wraps calls to `helm' with setup and teardown forms to make sure no overlays,
 advices, or hooks leak from the preview."
   `(progn
+     (helm-ag--delete-temporaries)
      (helm-ag--setup-advice)
      (helm-ag--setup-overlays)
      (unwind-protect (progn ,@body)
