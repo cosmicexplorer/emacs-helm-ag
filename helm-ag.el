@@ -466,10 +466,12 @@ large buffers."
   (when (use-region-p)
     (buffer-substring-no-properties (region-beginning) (region-end))))
 
-(defun helm-ag--query ()
+(defun helm-ag--query (&optional previous-query)
   (let* ((searched-word (helm-ag--searched-word))
          (marked-word (helm-ag--marked-input))
-         (query (read-string "Pattern: " (or marked-word searched-word) 'helm-ag--command-history)))
+         (query (or previous-query
+                    (read-string "Pattern: " (or marked-word searched-word)
+                                 'helm-ag--command-history))))
     (when (string= query "")
       (error "Input is empty!!"))
     (setq helm-ag--last-query query)))
@@ -500,10 +502,11 @@ large buffers."
                (push (read-directory-name "Search directory: " nil nil t) dirs))
              (reverse dirs))))))
 
-(defsubst helm-ag--helm-header (dir)
+(defsubst helm-ag--helm-header (dir &optional regex)
   (if helm-ag--buffer-search
       "Search Buffers"
-    (concat "Search at " (abbreviate-file-name dir))))
+    (concat "Search" (if regex (concat " /" regex "/") "") " at "
+            (abbreviate-file-name dir))))
 
 (defun helm-ag--run-other-window-action ()
   (interactive)
@@ -723,6 +726,7 @@ Special commands:
     (define-key map (kbd "C-c C-e") 'helm-ag-edit)
     (define-key map (kbd "C-x C-s") 'helm-ag--run-save-buffer)
     (define-key map (kbd "C-c ?") 'helm-ag-help)
+    (define-key map (kbd "C-s") #'helm-ag--ag-switch-to-do-ag)
     map)
   "Keymap for `helm-ag'.")
 
@@ -748,7 +752,7 @@ Continue searching the parent directory? "))
     (message nil)))
 
 ;;;###autoload
-(defun helm-ag (&optional basedir)
+(defun helm-ag (&optional basedir query)
   (interactive)
   (setq helm-ag--original-window (selected-window))
   (helm-ag--clear-variables)
@@ -759,9 +763,12 @@ Continue searching the parent directory? "))
             targets dir))
     (let ((helm-ag--default-directory (or basedir dir))
           (helm-ag--default-target targets))
-      (helm-ag--query)
+      (helm-ag--query query)
       (helm-attrset 'search-this-file nil helm-ag-source)
-      (helm-attrset 'name (helm-ag--helm-header helm-ag--default-directory) helm-ag-source)
+      (helm-attrset
+       'name
+       (helm-ag--helm-header helm-ag--default-directory helm-ag--last-query)
+       helm-ag-source)
       (helm-ag--safe-do-helm
        (helm :sources '(helm-ag-source) :buffer "*helm-ag*"
              :keymap helm-ag-map)))))
@@ -1152,6 +1159,7 @@ advices, or hooks leak from the preview."
     (set-keymap-parent map helm-ag-map)
     (define-key map (kbd "C-l") 'helm-ag--do-ag-up-one-level)
     (define-key map (kbd "C-c ?") 'helm-ag--do-ag-help)
+    (define-key map (kbd "C-s") 'helm-ag--do-ag-switch-to-ag)
     map)
   "Keymap for `helm-do-ag'.")
 
@@ -1164,6 +1172,10 @@ advices, or hooks leak from the preview."
     :nohighlight t
     :requires-pattern 3
     :candidate-number-limit 9999))
+
+(defun helm-ag--do-ag-switch-to-ag (dir query)
+  (interactive (list default-directory helm-pattern))
+  (helm-run-after-exit (lambda () (helm-ag dir query))))
 
 (defun helm-ag--do-ag-up-one-level ()
   (interactive)
@@ -1205,18 +1217,17 @@ Continue searching the parent directory? "))
 (defsubst helm-do-ag--target-one-directory-p (targets)
   (and (listp targets) (= (length targets) 1) (file-directory-p (car targets))))
 
-(defun helm-do-ag--helm ()
-  (let ((search-dir (if (not (helm-ag--windows-p))
-                        helm-ag--default-directory
-                      (if (helm-do-ag--target-one-directory-p helm-ag--default-target)
-                          (car helm-ag--default-target)
-                        helm-ag--default-directory))))
-    (helm-attrset 'name (helm-ag--helm-header search-dir)
-                  helm-source-do-ag)
-    (helm-ag--safe-do-helm
-     (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
-           :input (helm-ag--insert-thing-at-point helm-ag-insert-at-point)
-           :keymap helm-do-ag-map))))
+(defun helm-do-ag--helm (&optional query)
+  (let ((search-dir
+         (cond ((not (helm-ag--windows-p)) helm-ag--default-directory)
+               ((helm-do-ag--target-one-directory-p helm-ag--default-target)
+                (car helm-ag--default-target))
+               (t helm-ag--default-directory))))
+    (helm-attrset 'name "The Silver Searcher" helm-source-do-ag)
+    (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
+          :input (or query
+                     (helm-ag--insert-thing-at-point helm-ag-insert-at-point))
+          :keymap helm-do-ag-map)))
 
 ;;;###autoload
 (defun helm-do-ag-this-file ()
@@ -1225,8 +1236,12 @@ Continue searching the parent directory? "))
       (helm-do-ag default-directory (list it))
     (error "Error: This buffer is not visited file.")))
 
+(defun helm-ag--ag-switch-to-do-ag (dir query)
+  (interactive (list default-directory helm-ag--last-query))
+  (helm-run-after-exit (lambda () (helm-do-ag dir dir query))))
+
 ;;;###autoload
-(defun helm-do-ag (&optional basedir targets)
+(defun helm-do-ag (&optional basedir targets query)
   (interactive)
   (require 'helm-mode)
   (setq helm-ag--original-window (selected-window))
@@ -1249,11 +1264,11 @@ Continue searching the parent directory? "))
     (helm-ag--save-current-context)
     (helm-attrset 'search-this-file (and (= (length targets) 1) (car targets)) helm-source-do-ag)
     (if (or (helm-ag--windows-p) (not one-directory-p)) ;; Path argument must be specified on Windows
-        (helm-do-ag--helm)
+        (helm-do-ag--helm query)
       (let* ((helm-ag--default-directory
               (file-name-as-directory (car helm-ag--default-target)))
              (helm-ag--default-target nil))
-        (helm-do-ag--helm)))))
+        (helm-do-ag--helm query)))))
 
 (defun helm-ag--project-root ()
   (cl-loop for dir in '(".git/" ".hg/" ".svn/")
