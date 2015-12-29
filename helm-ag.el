@@ -1146,7 +1146,8 @@ buffer as `helm-ag' highlights their matches.")
         (helm-ag--refresh-overlay-list
          helm-ag--process-preview-overlays beg end
          (helm-ag--pcre-to-elisp-regexp
-          (helm-ag--join-patterns (or helm-ag--last-query "")))
+          (helm-ag--join-patterns
+           (or helm-ag--previous-last-query helm-ag--last-query "")))
          'helm-ag-process-pattern-match
          (helm-ag--pcre-to-elisp-regexp (helm-ag--join-patterns helm-pattern))
          'helm-ag-minibuffer-match)))
