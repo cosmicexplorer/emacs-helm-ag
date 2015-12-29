@@ -1146,7 +1146,8 @@ buffer as `helm-ag' highlights their matches.")
         (helm-ag--refresh-overlay-list
          helm-ag--process-preview-overlays beg end
          (helm-ag--pcre-to-elisp-regexp
-          (helm-ag--join-patterns (or helm-ag--last-query "")))
+          (helm-ag--join-patterns
+           (or helm-ag--previous-last-query helm-ag--last-query "")))
          'helm-ag-process-pattern-match
          (helm-ag--pcre-to-elisp-regexp (helm-ag--join-patterns helm-pattern))
          'helm-ag-minibuffer-match)))
@@ -1295,7 +1296,8 @@ advices, or hooks leak from the preview."
          (unless (string= helm-ag--last-query "")
            (let ((orig-pt (point))
                  (back-reg
-                  (helm-ag--convert-helm-regexp-to-elisp helm-ag--last-query)))
+                  (helm-ag--pcre-to-elisp-regexp
+                   (helm-ag--join-patterns helm-pattern))))
              (end-of-line)
              (unless (re-search-backward back-reg nil t) (goto-char orig-pt)))))
        (helm-ag--teardown-advice)
