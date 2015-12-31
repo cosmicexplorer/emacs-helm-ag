@@ -900,6 +900,10 @@ Special commands:
     (helm-ag--advance-match #'helm-ag--wrapping-backward-line)
     (helm-ag--refresh-position)))
 
+(defun helm-ag--insert-space ()
+  (interactive)
+  (insert "[[:space:]]"))
+
 (defvar helm-ag-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map helm-map)
@@ -908,6 +912,7 @@ Special commands:
     (define-key map (kbd "C-c C-e") 'helm-ag-edit)
     (define-key map (kbd "C-x C-s") 'helm-ag--run-save-buffer)
     (define-key map (kbd "C-c ?") 'helm-ag-help)
+    (define-key map (kbd "C-c s") #'helm-ag--insert-space)
     (define-key map (kbd "C-s") #'helm-ag--ag-switch-to-do-ag)
     (define-key map (kbd "<right>") #'helm-ag--next-file)
     (define-key map (kbd "C->") #'helm-ag--next-file)
@@ -1399,6 +1404,7 @@ advices, or hooks leak from the preview."
     (define-key map (kbd "C-l") 'helm-ag--do-ag-up-one-level)
     (define-key map (kbd "C-c ?") 'helm-ag--do-ag-help)
     (define-key map (kbd "C-s") 'helm-ag--do-ag-switch-to-ag)
+    (define-key map (kbd "C-c s") #'helm-ag--insert-space)
     (define-key map (kbd "<right>") #'helm-ag--next-file)
     (define-key map (kbd "C->") #'helm-ag--next-file)
     (define-key map (kbd "<left>") #'helm-ag--previous-file)
