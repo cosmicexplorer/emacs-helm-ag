@@ -1162,17 +1162,20 @@ Continue searching the parent directory? "))
 (defsubst helm-ag--delete-overlays (olays) (mapc #'delete-overlay olays))
 
 (defun helm-ag--find-next-match-overlays (end pos-reg neg-reg)
-  (ignore-errors
-    (cl-block found
-      (while (re-search-forward pos-reg end t)
-        (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
-          (cl-return-from found t))))))
+  (cl-block found
+    (while (re-search-forward pos-reg end t)
+      (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
+        (cl-return-from found t)))))
 
 (defun helm-ag--make-overlays (beg end regexp face)
   "Apply an overlay to all matches between BEG and END of REGEXP with face
 FACE."
-  (let ((pos-reg (helm-ag--join-regexps (plist-get regexp :positive)))
-        (neg-reg (helm-ag--join-regexps (plist-get regexp :negative))))
+  (let* ((is-helm-buf (eq (current-buffer) (helm-buffer-get)))
+        (reg-list
+         (if (not is-helm-buf) regexp
+           (helm-ag--plist-map #'helm-ag--filter-helm-patterns regexp)))
+        (pos-reg (helm-ag--join-regexps (plist-get reg-list :positive)))
+        (neg-reg (helm-ag--join-regexps (plist-get reg-list :negative))))
     (unless (string= "" pos-reg)
       (save-excursion
         (goto-char beg)
