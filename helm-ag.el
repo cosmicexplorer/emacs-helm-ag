@@ -558,7 +558,8 @@ regexp by inserting alternation (\\|) in between top-level groups."
 
 (defun helm-ag--add-header-for-carat (pattern)
   (cond ((or (string= pattern "^")
-             (string= pattern "$"))
+             (string= pattern "$")
+             (string= pattern ""))
          nil)
         ((char-equal (aref pattern 0) ?^)
          (concat "^[^:]+:[0-9]+:" (substring pattern 1)))
@@ -961,9 +962,7 @@ Continue searching the parent directory? "))
       (helm-attrset 'search-this-file nil helm-ag-source)
       (helm-attrset
        'name
-       (helm-ag--helm-header
-        helm-ag--default-directory
-        (or helm-ag--previous-last-query helm-ag--last-query))
+       (helm-ag--helm-header helm-ag--default-directory helm-ag--last-query)
        helm-ag-source)
       (let ((helm-ag--ag-or-do-ag 'ag))
         (helm-ag--safe-do-helm
@@ -1158,7 +1157,7 @@ Continue searching the parent directory? "))
 (defun helm-ag--make-overlays (beg end regexp face)
   "Apply an overlay to all matches between BEG and END of REGEXP with face
 FACE."
-  (let* ((is-helm-buf (eq (current-buffer) (helm-buffer-get)))
+  (let* ((is-helm-buf (string= (buffer-name) (helm-buffer-get)))
         (reg-list
          (if (not is-helm-buf) regexp
            (helm-ag--plist-map #'helm-ag--filter-helm-patterns regexp)))
@@ -1216,7 +1215,7 @@ END. PRIMARY-REGEXP, PRIMARY-FACE, SECONDARY-REGEXP, and SECONDARY-FACE work as
 described in `helm-ag--clean-add-overlays'."
   (helm-ag--conditional-let (string= helm-ag--last-query helm-pattern)
       ;; doesn't match anything
-      ((secondary-regexp "[^[:ascii:][:nonascii:]]+"))
+      ((secondary-regexp nil))
     (helm-ag--delete-overlays prev-list)
     (helm-ag--clean-add-overlays beg end primary-regexp primary-face
                                  secondary-regexp secondary-face)))
@@ -1232,7 +1231,7 @@ buffer as `helm-ag' highlights their matches.")
          helm-ag--process-preview-overlays beg end
          (let* ((primary-reg
                  (if (eq helm-ag--ag-or-do-ag 'ag)
-                     (or helm-ag--previous-last-query helm-ag--last-query "")
+                     (or helm-ag--last-query "")
                    helm-pattern)))
            (helm-ag--replace-lookarounds
             (helm-ag--pcre-to-elisp-regexp
@@ -1424,8 +1423,6 @@ advices, or hooks leak from the preview."
     :requires-pattern 3
     :candidate-number-limit 9999))
 
-(defvar helm-ag--previous-last-query nil)
-
 (defun helm-ag--do-ag-switch-to-ag (dir query)
   (interactive (list default-directory helm-pattern))
   (let ((real-query
@@ -1433,10 +1430,10 @@ advices, or hooks leak from the preview."
            query)))
     (helm-run-after-exit
      (lambda ()
-       (setq helm-ag--previous-last-query query)
        (helm-ag
-        dir (helm-ag--join-patterns
-             (cdr (helm-ag--parse-options-and-query real-query))))))))
+        dir
+        (helm-ag--join-patterns
+         (cdr (helm-ag--parse-options-and-query real-query))))))))
 
 (defun helm-ag--do-ag-up-one-level ()
   (interactive)
@@ -1502,10 +1499,7 @@ Continue searching the parent directory? "))
 (defun helm-ag--ag-switch-to-do-ag (dir query)
   (interactive (list default-directory helm-ag--last-query))
   ;; if we just converted from a helm regex to enter helm-ag from helm-do-ag
-  (let ((real-query (or helm-ag--previous-last-query query)))
-    (setq helm-ag--previous-last-query nil)
-    (helm-run-after-exit
-     (lambda () (helm-do-ag dir dir real-query)))))
+  (helm-run-after-exit (lambda () (helm-do-ag dir dir real-query))))
 
 ;;;###autoload
 (defun helm-do-ag (&optional basedir targets query)
