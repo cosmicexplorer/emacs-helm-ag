@@ -1069,10 +1069,11 @@ Continue searching the parent directory? "))
 (defsubst helm-ag--delete-overlays (olays) (mapc #'delete-overlay olays))
 
 (defun helm-ag--find-next-match-overlays (end pos-reg neg-reg)
-  (cl-block found
-    (while (re-search-forward pos-reg end t)
-      (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
-        (cl-return-from found t)))))
+  (ignore-errors
+    (cl-block found
+      (while (re-search-forward pos-reg end t)
+        (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
+          (cl-return-from found t))))))
 
 (defun helm-ag--make-overlays (beg end regexp face)
   "Apply an overlay to all matches between BEG and END of REGEXP with face
