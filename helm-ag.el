@@ -519,12 +519,13 @@ regexp by inserting alternation (\\|) in between top-level groups."
 
 (defvar helm-ag--prev-line nil)
 (defun helm-ag--search-next-match-pos-neg (pos-reg neg-reg)
-  (cl-block found
-    (while (re-search-forward (or (car pos-reg) ".") nil t)
-      (let ((this-line (helm-ag--get-string-at-line)))
-        (when (and (helm-ag--matches-all-regexps (cdr pos-reg) this-line)
-                   (helm-ag--matches-all-regexps neg-reg this-line t))
-          (cl-return-from found t))))))
+  (ignore-errors
+    (cl-block found
+      (while (re-search-forward (or (car pos-reg) ".") nil t)
+        (let ((this-line (helm-ag--get-string-at-line)))
+          (when (and (helm-ag--matches-all-regexps (cdr pos-reg) this-line)
+                     (helm-ag--matches-all-regexps neg-reg this-line t))
+            (cl-return-from found t)))))))
 
 (defvar helm-ag--buffer-search-cache (make-hash-table :test 'equal))
 (defconst helm-ag--cache-size 10000)
@@ -1384,19 +1385,20 @@ advices, or hooks leak from the preview."
      (helm-ag--delete-temporaries)
      (helm-ag--setup-advice)
      (helm-ag--setup-overlays)
-     (unwind-protect (progn ,@body)
-       (when (= helm-exit-status 0)
-         ;; move match to center, and move point in front of match, if succeeded
-         (helm-ag--recenter)
-         (unless (string= helm-ag--last-query "")
-           (let ((orig-pt (point))
-                 (back-reg
-                  (helm-ag--pcre-to-elisp-regexp
-                   (helm-ag--join-patterns helm-pattern))))
-             (end-of-line)
-             (unless (re-search-backward back-reg nil t) (goto-char orig-pt)))))
-       (helm-ag--teardown-advice)
-       (helm-ag--delete-temporaries))))
+     (let ((helm-fuzzy-matching-highlight-fn #'identity))
+       (unwind-protect (progn ,@body)
+         (when (= helm-exit-status 0)
+           ;; move match to center, and move point in front of match, if succeeded
+           (helm-ag--recenter)
+           (unless (string= helm-ag--last-query "")
+             (let ((orig-pt (point))
+                   (back-reg
+                    (helm-ag--pcre-to-elisp-regexp
+                     (helm-ag--join-patterns helm-pattern))))
+               (end-of-line)
+               (unless (re-search-backward back-reg nil t) (goto-char orig-pt)))))
+         (helm-ag--teardown-advice)
+         (helm-ag--delete-temporaries)))))
 
 (defvar helm-do-ag-map
   (let ((map (make-sparse-keymap)))
