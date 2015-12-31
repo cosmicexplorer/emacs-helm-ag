@@ -375,7 +375,8 @@ large buffers."
    "\\(\\(?:.\\|\n\\)+?\\)"
    "\\(?:\\\\)\\.\\+\\$\\|\\.\\*\\)\\\\)"))
 
-(defsubst helm-ag--join-regexps (reg-list) (string-join reg-list "\\|"))
+(defsubst helm-ag--join-regexps (reg-list)
+  (if reg-list (string-join reg-list "\\|") "[^[:ascii:][:nonascii:]]"))
 
 (defun helm-ag--collect-lookaround-regexps (regexp-list)
   (cl-loop with pos-results = nil
@@ -561,8 +562,9 @@ regexp by inserting alternation (\\|) in between top-level groups."
     (helm-ag--query)
     (helm-attrset 'search-this-file (buffer-file-name) helm-ag-source)
     (helm-attrset 'name (format "Search at %s" filename) helm-ag-source)
-    (helm-ag--safe-do-helm
-     (helm :sources '(helm-ag-source) :buffer "*helm-ag*"))))
+    (let ((helm-ag--ag-or-do-ag 'ag))
+      (helm-ag--safe-do-helm
+       (helm :sources '(helm-ag-source) :buffer "*helm-ag*")))))
 
 (defun helm-ag--get-default-directory ()
   (let ((prefix-val (and current-prefix-arg (abs (prefix-numeric-value current-prefix-arg)))))
@@ -878,6 +880,8 @@ Continue searching the parent directory? "))
                     :keymap helm-ag-map))))))
     (message nil)))
 
+(defvar helm-ag--ag-or-do-ag nil)
+
 ;;;###autoload
 (defun helm-ag (&optional basedir query)
   (interactive)
@@ -898,9 +902,10 @@ Continue searching the parent directory? "))
         helm-ag--default-directory
         (or helm-ag--previous-last-query helm-ag--last-query))
        helm-ag-source)
-      (helm-ag--safe-do-helm
-       (helm :sources '(helm-ag-source) :buffer "*helm-ag*"
-             :keymap helm-ag-map)))))
+      (let ((helm-ag--ag-or-do-ag 'ag))
+        (helm-ag--safe-do-helm
+         (helm :sources '(helm-ag-source) :buffer "*helm-ag*"
+               :keymap helm-ag-map))))))
 
 (defun helm-ag--split-string (str)
   (with-temp-buffer
@@ -1061,41 +1066,43 @@ Continue searching the parent directory? "))
 (defsubst helm-ag--get-string-at-line ()
   (buffer-substring-no-properties (point-at-bol) (point-at-eol)))
 (defsubst helm-ag--recenter () (recenter (/ (window-height) 2)))
+(defsubst helm-ag--delete-overlays (olays) (mapc #'delete-overlay olays))
 
-
-(defun helm-ag--delete-overlays (olays)
-  "Delete all overlays in OLAYS."
-  (cl-loop for olay in olays do (delete-overlay olay)))
-(defun helm-ag--clean-space-delimited-regexp (regexp)
-  "Split a `helm'-like minibuffer REGEXP, delimited by spaces, into a list of
-smaller regexps without whitespace."
-  (split-string
-   (replace-regexp-in-string "\\`[[:space:]]+\\|[[:space:]]\\'" "" regexp)))
+(defun helm-ag--find-next-match-overlays (end pos-reg neg-reg)
+  (cl-block found
+    (while (re-search-forward pos-reg end t)
+      (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
+        (cl-return-from found t)))))
 
 (defun helm-ag--make-overlays (beg end regexp face)
   "Apply an overlay to all matches between BEG and END of REGEXP with face
 FACE."
-  (save-excursion
-    (goto-char beg)
-    (cl-loop while (re-search-forward regexp end t)
-             for i from 1 to helm-ag--preview-max-matches
-             collect (let* ((reg-beg (match-beginning 0))
-                            (reg-end (match-end 0))
-                            (olay (make-overlay reg-beg reg-end)))
-                       (overlay-put olay 'face face)
-                       olay))))
+  (let ((pos-reg (helm-ag--join-regexps (plist-get regexp :positive)))
+        (neg-reg (helm-ag--join-regexps (plist-get regexp :negative))))
+    (unless (string= "" pos-reg)
+      (save-excursion
+        (goto-char beg)
+        (cl-loop
+         while (helm-ag--find-next-match-overlays end pos-reg neg-reg)
+         for i from 1 to helm-ag--preview-max-matches
+         collect (let* ((reg-beg (match-beginning 0))
+                        (reg-end (match-end 0))
+                        (olay (make-overlay reg-beg reg-end)))
+                   (overlay-put olay 'face face)
+                   olay))))))
 
 (defun helm-ag--apply-first-second-overlays (olays regexp face)
   "To all lines on which a member of OLAYS begins on, search for REGEXP and
 apply an overlay with face FACE."
-  (apply
-   #'append
-   (cl-loop for olay in olays
-            collect (save-excursion
-                      (goto-char (overlay-start olay))
-                      (helm-ag--make-overlays
-                       (line-beginning-position) (line-end-position)
-                       regexp face)))))
+  (when regexp
+    (apply
+     #'append
+     (cl-loop for olay in olays
+              collect (save-excursion
+                        (goto-char (overlay-start olay))
+                        (helm-ag--make-overlays
+                         (line-beginning-position) (line-end-position)
+                         regexp face))))))
 
 (defun helm-ag--clean-add-overlays
     (beg end primary-regexp primary-face secondary-regexp secondary-face)
@@ -1106,12 +1113,10 @@ SECONDARY-FACE. SECONDARY-REGEXP is a helm minibuffer regexp, so it is split
 into components based on whitespace."
   (let* ((case-fold-search t)
          (primary-overlays
-          (unless (string= "" primary-regexp)
-            (helm-ag--make-overlays beg end primary-regexp primary-face)))
+          (helm-ag--make-overlays beg end primary-regexp primary-face))
          (secondary-overlays
-          (unless (string= "" secondary-regexp)
-            (helm-ag--apply-first-second-overlays
-             primary-overlays secondary-regexp secondary-face))))
+          (helm-ag--apply-first-second-overlays
+           primary-overlays secondary-regexp secondary-face)))
     (append primary-overlays secondary-overlays)))
 
 (defmacro helm-ag--conditional-let (condition bindings &rest body)
@@ -1140,11 +1145,22 @@ buffer as `helm-ag' highlights their matches.")
   (setq helm-ag--process-preview-overlays
         (helm-ag--refresh-overlay-list
          helm-ag--process-preview-overlays beg end
-         (helm-ag--pcre-to-elisp-regexp
-          (helm-ag--join-patterns
-           (or helm-ag--previous-last-query helm-ag--last-query "")))
+         (let* ((primary-reg
+                 (if (eq helm-ag--ag-or-do-ag 'ag)
+                     (or helm-ag--previous-last-query helm-ag--last-query "")
+                   helm-pattern)))
+           (helm-ag--replace-lookarounds
+            (helm-ag--pcre-to-elisp-regexp
+             (helm-ag--join-patterns
+              (if helm-ag-use-emacs-lisp-regexp
+                  (helm-ag--elisp-regexp-to-pcre primary-reg)
+                primary-reg)))))
          'helm-ag-process-pattern-match
-         (helm-ag--pcre-to-elisp-regexp (helm-ag--join-patterns helm-pattern))
+         (when (eq helm-ag--ag-or-do-ag 'ag)
+           (helm-ag--replace-lookarounds
+            (helm-ag--pcre-to-elisp-regexp
+             (helm-ag--join-patterns
+              (helm-ag--elisp-regexp-to-pcre helm-pattern)))))
          'helm-ag-minibuffer-match)))
 
 (defun helm-ag--refresh-listing-overlays ()
@@ -1382,11 +1398,12 @@ Continue searching the parent directory? "))
                 (car helm-ag--default-target))
                (t helm-ag--default-directory))))
     (helm-attrset 'name "The Silver Searcher" helm-source-do-ag)
-    (helm-ag--safe-do-helm
-     (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
-           :input (or query
-                      (helm-ag--insert-thing-at-point helm-ag-insert-at-point))
-           :keymap helm-do-ag-map))))
+    (let ((helm-ag--ag-or-do-ag 'do-ag))
+      (helm-ag--safe-do-helm
+       (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
+             :input (or query
+                        (helm-ag--insert-thing-at-point helm-ag-insert-at-point))
+             :keymap helm-do-ag-map)))))
 
 ;;;###autoload
 (defun helm-do-ag-this-file ()
