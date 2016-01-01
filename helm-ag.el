@@ -852,59 +852,33 @@ Special commands:
        (lambda (_arg)
          (helm-ag--save-results use-other-buf-p))))))
 
-(defconst helm-ag--file-line-parse-regexp "^\\([^:]+\\):\\([0-9]+\\):")
-(defun helm-ag--get-match-info ()
-  (with-helm-window
-    (let ((s (buffer-substring (line-beginning-position) (line-end-position))))
-      (when (string-match helm-ag--file-line-parse-regexp s)
-        (list :file (match-string 1 s)
-              :line (string-to-number (match-string 2 s)))))))
-
-(defun helm-ag--advance-match (motion)
-  (let ((initial-match-info (helm-ag--get-match-info)))
-    ;; if there are any matches
-    (when initial-match-info
-      (cl-destructuring-bind (:file file :line line) initial-match-info
-        (funcall motion)
-        (cl-loop
-         for cur-match-info = (helm-ag--get-match-info)
-         ;; these are nil if cur-match-info is nil
-         for f = (plist-get cur-match-info :file)
-         for l = (plist-get cur-match-info :line)
-         while (or (not f) (string= file f))
-         until (and l (= line l))
-         do (funcall motion)
-         finally (when (string= file f)
-                   (message "%s" "Couldn't find new file!")))))))
-
-(defun helm-ag--wrapping-forward-line ()
-  (if (looking-at "[^\n]*\\'") (goto-char (point-min))
-    (forward-line 1)))
-
-(defun helm-ag--wrapping-backward-line ()
-  (if (looking-back "\\`[^\n]*") (goto-char (point-max))
-    (forward-line -1)))
-
-(defun helm-ag--refresh-position ()
-  (let ((helm-swoop-move-to-line-cycle t))
-    (call-interactively #'helm-next-line)
-    (call-interactively #'helm-previous-line)))
-
-(defun helm-ag--next-file ()
-  (interactive)
-  (with-helm-window
-    (helm-ag--advance-match #'helm-ag--wrapping-forward-line)
-    (helm-ag--refresh-position)))
-
-(defun helm-ag--previous-file ()
-  (interactive)
-  (with-helm-window
-    (helm-ag--advance-match #'helm-ag--wrapping-backward-line)
-    (helm-ag--refresh-position)))
-
 (defun helm-ag--insert-space ()
   (interactive)
   (insert "[[:space:]]"))
+
+(defun helm-ag--file-of-current-file ()
+  (let ((line (helm-current-line-contents)))
+    (when (string-match helm-grep-split-line-regexp line)
+      (match-string-no-properties 1 line))))
+
+(defun helm-ag--move-file-common (pred move-fn wrap-fn)
+  (with-helm-window
+    (let ((file (helm-ag--file-of-current-file)))
+      (funcall move-fn)
+      (while (and (not (funcall pred)) (string= file (helm-ag--file-of-current-file)))
+        (funcall move-fn))
+      (when (funcall pred)
+        (funcall wrap-fn)))))
+
+(defun helm-ag--previous-file ()
+  (interactive)
+  (helm-ag--move-file-common
+   #'helm-beginning-of-source-p #'helm-previous-line #'helm-end-of-buffer))
+
+(defun helm-ag--next-file ()
+  (interactive)
+  (helm-ag--move-file-common
+   #'helm-end-of-source-p #'helm-next-line #'helm-beginning-of-buffer))
 
 (defvar helm-ag-map
   (let ((map (make-sparse-keymap)))
@@ -916,10 +890,10 @@ Special commands:
     (define-key map (kbd "C-c ?") 'helm-ag-help)
     (define-key map (kbd "C-c s") #'helm-ag--insert-space)
     (define-key map (kbd "C-s") #'helm-ag--ag-switch-to-do-ag)
-    (define-key map (kbd "<right>") #'helm-ag--next-file)
-    (define-key map (kbd "C->") #'helm-ag--next-file)
-    (define-key map (kbd "<left>") #'helm-ag--previous-file)
-    (define-key map (kbd "C-<") #'helm-ag--previous-file)
+    (define-key map (kbd "C-c >") 'helm-ag--next-file)
+    (define-key map (kbd "<right>") 'helm-ag--next-file)
+    (define-key map (kbd "C-c <") 'helm-ag--previous-file)
+    (define-key map (kbd "<left>") 'helm-ag--previous-file)
     map)
   "Keymap for `helm-ag'.")
 
@@ -1405,11 +1379,6 @@ advices, or hooks leak from the preview."
     (define-key map (kbd "C-l") 'helm-ag--do-ag-up-one-level)
     (define-key map (kbd "C-c ?") 'helm-ag--do-ag-help)
     (define-key map (kbd "C-s") 'helm-ag--do-ag-switch-to-ag)
-    (define-key map (kbd "C-c s") #'helm-ag--insert-space)
-    (define-key map (kbd "<right>") #'helm-ag--next-file)
-    (define-key map (kbd "C->") #'helm-ag--next-file)
-    (define-key map (kbd "<left>") #'helm-ag--previous-file)
-    (define-key map (kbd "C-<") #'helm-ag--previous-file)
     map)
   "Keymap for `helm-do-ag'.")
 
