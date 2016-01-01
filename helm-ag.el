@@ -134,6 +134,11 @@ large buffers."
   :safe t
   :group 'helm-ag)
 
+(defcustom helm-ag-delete-opened-buffers t
+  "`helm-ag--display-preview' opens files with `find-file-noselect' to display a
+preview of them. When this option is non-nil, these buffers will be killed after
+a `helm-ag' or `helm-do-ag' session.")
+
 (defface helm-ag-edit-deleted-line
   '((t (:inherit font-lock-comment-face :strike-through t)))
   "Face of deleted line in edit mode."
@@ -936,7 +941,9 @@ Continue searching the parent directory? "))
       (helm-attrset 'search-this-file nil helm-ag-source)
       (helm-attrset
        'name
-       (helm-ag--helm-header helm-ag--default-directory helm-ag--last-query)
+       (helm-ag--helm-header
+        helm-ag--default-directory
+        (or helm-ag--previous-last-query helm-ag--last-query))
        helm-ag-source)
       (let ((helm-ag--ag-or-do-ag 'ag))
         (helm-ag--safe-do-helm
@@ -1256,6 +1263,9 @@ changed.")
 (defvar helm-ag--buffers-displayed nil
   "List of all buffers displayed during a session so that their overlays can be
 deleted afterwards.")
+(defvar helm-ag--new-buffers-opened-for-preview nil
+  "List of all buffers newly opened with `find-file-noselect' within
+`helm-ag--display-preview' so that they can be killed afterwards.")
 (defun helm-ag--display-preview ()
   "Display a preview of some sort of the selected match. Create or refresh
 overlays highlighting text of matches in the matching buffer."
@@ -1265,8 +1275,11 @@ overlays highlighting text of matches in the matching buffer."
       (when match
         (let* ((file (match-string 1 str))
                (line (string-to-number (match-string 2 str)))
-               (buf-displaying-file (or (get-file-buffer file)
-                                        (find-file-noselect file))))
+               (buf-displaying-file
+                (or (get-file-buffer file)
+                    (let ((buf (find-file-noselect file)))
+                      (push buf helm-ag--new-buffers-opened-for-preview)
+                      buf))))
           (add-to-list 'helm-ag--buffers-displayed buf-displaying-file)
           (with-selected-window helm-ag--original-window
             (switch-to-buffer buf-displaying-file)
@@ -1323,7 +1336,15 @@ through `helm-ag--disabled-advices-alist'."
 (add-to-list 'helm-ag--disabled-advices-alist
              '(helm-highlight-current-line helm-ag--fix-face))
 
+(defun helm-ag--reset-variables ()
+  (setq helm-ag--preview-overlay nil
+        helm-ag--previous-preview-buffer nil
+        helm-ag--previous-minibuffer-pattern nil
+        helm-ag--buffers-displayed nil
+        helm-ag--new-buffers-opened-for-preview nil
+        helm-ag--previous-line nil))
 (defun helm-ag--setup-advice ()
+  (helm-ag--reset-variables)
   (cl-loop for el in helm-ag--disabled-advices-alist
            do (progn (ad-enable-advice (cl-first el) 'around (cl-second el))
                      (ad-activate (cl-first el))))
@@ -1345,15 +1366,14 @@ through `helm-ag--disabled-advices-alist'."
                 (cl-loop for olay in helm-ag--process-preview-overlays
                          do (when olay (delete-overlay olay)))
                 (setq helm-ag--process-preview-overlays nil)))
-  (setq helm-ag--preview-overlay nil
-        helm-ag--previous-preview-buffer nil
-        helm-ag--previous-minibuffer-pattern nil
-        helm-ag--buffers-displayed nil
-        helm-ag--previous-line nil))
+  (when helm-ag-delete-opened-buffers
+    (cl-loop for buf in helm-ag--new-buffers-opened-for-preview
+             do (unless (eq (current-buffer) buf) (kill-buffer buf))))
+  (helm-ag--reset-variables))
 
 (defmacro helm-ag--safe-do-helm (&rest body)
   "Wraps calls to `helm' with setup and teardown forms to make sure no overlays,
-advices, or hooks leak from the preview."
+advices, buffers, or hooks leak from the preview."
   `(progn
      (helm-ag--delete-temporaries)
      (helm-ag--setup-advice)
@@ -1392,11 +1412,13 @@ advices, or hooks leak from the preview."
     :requires-pattern 3
     :candidate-number-limit 9999))
 
+(defvar helm-ag--previous-last-query nil)
 (defun helm-ag--do-ag-switch-to-ag (dir query)
   (interactive (list default-directory helm-pattern))
   (let ((real-query
          (if helm-ag-use-emacs-lisp-regexp (helm-ag--elisp-regexp-to-pcre query)
            query)))
+    (setq helm-ag--previous-last-query query)
     (helm-run-after-exit
      (lambda ()
        (helm-ag
