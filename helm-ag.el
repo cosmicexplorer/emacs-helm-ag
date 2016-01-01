@@ -868,7 +868,10 @@ Special commands:
       (while (and (not (funcall pred)) (string= file (helm-ag--file-of-current-file)))
         (funcall move-fn))
       (when (funcall pred)
-        (funcall wrap-fn)))))
+        (funcall wrap-fn)))
+    (let ((helm-swoop-move-to-line-cycle t))
+      (call-interactively #'helm-next-line)
+      (call-interactively #'helm-previous-line))))
 
 (defun helm-ag--previous-file ()
   (interactive)
