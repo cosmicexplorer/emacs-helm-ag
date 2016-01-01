@@ -1468,7 +1468,7 @@ Continue searching the parent directory? "))
 (defun helm-ag--ag-switch-to-do-ag (dir query)
   (interactive (list default-directory helm-ag--last-query))
   ;; if we just converted from a helm regex to enter helm-ag from helm-do-ag
-  (helm-run-after-exit (lambda () (helm-do-ag dir dir real-query))))
+  (helm-run-after-exit (lambda () (helm-do-ag dir dir query))))
 
 ;;;###autoload
 (defun helm-do-ag (&optional basedir targets query)
