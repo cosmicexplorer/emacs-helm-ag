@@ -247,8 +247,8 @@ a `helm-ag' or `helm-do-ag' session.")
     (setq helm-ag--elisp-regexp-query
           (helm-ag--parse-helm-input query))
     (setq helm-ag--valid-regexp-for-emacs
-          (cl-destructuring-bind (:positive pos :negative neg)
-              helm-ag--elisp-regexp-query
+          (let ((pos (plist-get helm-ag--elisp-regexp-query :positive))
+                (neg (plist-get helm-ag--elisp-regexp-query :negative)))
             (and (cl-every #'helm-ag--validate-regexp pos)
                  (cl-every #'helm-ag--validate-regexp neg))))
     (if (not options)
@@ -554,7 +554,8 @@ regexp by inserting alternation (\\|) in between top-level groups."
 (defun helm-ag--buffer-search-fn (pattern)
   (let* ((fixed-pattern (string-trim pattern))
          (pos-neg-regexps (helm-ag--convert-helm-to-regexps fixed-pattern)))
-    (cl-destructuring-bind (:positive pos-reg :negative neg-reg) pos-neg-regexps
+    (let ((pos-reg (plist-get pos-neg-regexps :positive))
+          (neg-reg (plist-get pos-neg-regexps :negative)))
       (helm-ag--search-next-match-pos-neg pos-reg neg-reg))))
 
 (defun helm-ag--add-header-for-carat (pattern)
@@ -1246,7 +1247,8 @@ buffer as `helm-ag' highlights their matches.")
 (defun helm-ag--display-preview-line-overlay (olay buf line)
   "Display overlay highlighting current line of match."
   (with-current-buffer buf
-    (goto-line line)
+    (goto-char (point-min))
+    (forward-line (1- line))
     (let ((beg (line-beginning-position))
           (end (1+ (line-end-position))))
       (move-overlay olay beg end buf))))
@@ -1283,7 +1285,8 @@ overlays highlighting text of matches in the matching buffer."
           (add-to-list 'helm-ag--buffers-displayed buf-displaying-file)
           (with-selected-window helm-ag--original-window
             (switch-to-buffer buf-displaying-file)
-            (goto-line line)
+            (goto-char (point-min))
+            (forward-line (1- line))
             (when helm-ag--preview-highlight-matches
               (helm-ag--display-preview-line-overlay
                helm-ag--preview-overlay buf-displaying-file line))
@@ -1331,7 +1334,7 @@ through `helm-ag--disabled-advices-alist'."
  helm-toggle-visible-mark helm-ag--toggle-visible-mark)
 
 (defadvice helm-highlight-current-line (around helm-ag--fix-face disable)
-  (ad-set-args 0 (nil nil nil 'helm-ag-process-pattern-match))
+  (ad-set-args 0 '(nil nil nil helm-ag-process-pattern-match))
   ad-do-it)
 (add-to-list 'helm-ag--disabled-advices-alist
              '(helm-highlight-current-line helm-ag--fix-face))
@@ -1467,7 +1470,7 @@ Continue searching the parent directory? "))
   (and (listp targets) (= (length targets) 1) (file-directory-p (car targets))))
 
 (defun helm-do-ag--helm (&optional query)
-  (let ((search-dir
+  (let ((helm-ag--default-directory
          (cond ((not (helm-ag--windows-p)) helm-ag--default-directory)
                ((helm-do-ag--target-one-directory-p helm-ag--default-target)
                 (car helm-ag--default-target))
