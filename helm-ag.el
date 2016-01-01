@@ -504,21 +504,17 @@ regexp by inserting alternation (\\|) in between top-level groups."
    "Open file other window" #'helm-ag--action-find-file-other-window
    "Save results in buffer" #'helm-ag--action-save-buffer))
 
-(defsubst helm-ag--get-string-at-line ()
-  (buffer-substring-no-properties (point-at-bol) (point-at-eol)))
-
-(defun helm-ag--xor (a b)
-  (or (and a (not b))
-      (and b (not a))))
-
 (defun helm-ag--matches-all-regexps (regexp-list str &optional no)
   (cond ((string-match-p "\\`[[:space:]]*\\'" str) nil)
         (no (cl-every (lambda (reg) (not (string-match-p reg str)))
                       regexp-list))
         (t (cl-every (lambda (reg) (string-match-p reg str)) regexp-list))))
 
-(defvar helm-ag--prev-line nil)
 (defun helm-ag--search-next-match-pos-neg (pos-reg neg-reg)
+  ;; this is similar to `helm-ag--find-next-match-overlays', but that one needs
+  ;; to highlight all matches, while this one only needs to determine whether a
+  ;; line is matched (which requires matching every single regexp in pos-reg,
+  ;; for example
   (ignore-errors
     (cl-block found
       (while (re-search-forward (or (car pos-reg) ".") nil t)
@@ -640,7 +636,8 @@ regexp by inserting alternation (\\|) in between top-level groups."
 (defsubst helm-ag--helm-header (dir &optional regex)
   (if helm-ag--buffer-search
       "Search Buffers"
-    (concat "Search " regex " at " (abbreviate-file-name dir))))
+    (concat "Search " (helm-aif regex (concat it " ") "") "at "
+            (abbreviate-file-name dir))))
 
 (defun helm-ag--run-other-window-action ()
   (interactive)
