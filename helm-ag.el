@@ -859,32 +859,43 @@ Special commands:
   (interactive)
   (insert "[[:space:]]"))
 
-(defun helm-ag--file-of-current-file ()
+(defun helm-ag--file-lineno-of-current-file ()
   (let ((line (helm-current-line-contents)))
     (when (string-match helm-grep-split-line-regexp line)
-      (match-string-no-properties 1 line))))
+      (list :file (match-string-no-properties 1 line)
+            :line-number (match-string-no-properties 2 line)))))
 
-(defun helm-ag--move-file-common (pred move-fn wrap-fn)
+(defun helm-ag--move-file-common (wrap-pred move-fn wrap-fn)
   (with-helm-window
-    (let ((file (helm-ag--file-of-current-file)))
-      (funcall move-fn)
-      (while (and (not (funcall pred)) (string= file (helm-ag--file-of-current-file)))
-        (funcall move-fn))
-      (when (funcall pred)
-        (funcall wrap-fn)))
-    (let ((helm-swoop-move-to-line-cycle t))
-      (call-interactively #'helm-next-line)
-      (call-interactively #'helm-previous-line))))
+    (let* ((helm-move-to-line-cycle-in-source t)
+           (file-lineno (helm-ag--file-lineno-of-current-file))
+           (file (plist-get file-lineno :file))
+           (lineno (string-to-number (plist-get file-lineno :line-number))))
+      (if (funcall wrap-pred) (funcall wrap-fn) (funcall move-fn))
+      (cl-loop
+       for new-file-lineno = (helm-ag--file-lineno-of-current-file)
+       for new-file = (plist-get new-file-lineno :file)
+       for new-lineno = (string-to-number
+                         (plist-get new-file-lineno :line-number))
+       while (and (string= file new-file)
+                  (not (= lineno new-lineno)))
+       do (progn (if (funcall wrap-pred) (funcall wrap-fn) (funcall move-fn))
+                 (setq lineno new-lineno)))
+      (let ((helm-swoop-move-to-line-cycle t))
+        (call-interactively #'helm-next-line)
+        (call-interactively #'helm-previous-line)))))
+
+(defun helm-ag--previous-line () (forward-line -1))
 
 (defun helm-ag--previous-file ()
   (interactive)
   (helm-ag--move-file-common
-   #'helm-beginning-of-source-p #'helm-previous-line #'helm-end-of-buffer))
+   #'helm-beginning-of-source-p #'helm-ag--previous-line #'helm-end-of-buffer))
 
 (defun helm-ag--next-file ()
   (interactive)
   (helm-ag--move-file-common
-   #'helm-end-of-source-p #'helm-next-line #'helm-beginning-of-buffer))
+   #'helm-end-of-source-p #'forward-line #'helm-beginning-of-buffer))
 
 (defvar helm-ag-map
   (let ((map (make-sparse-keymap)))
