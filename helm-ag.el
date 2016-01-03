@@ -1502,7 +1502,8 @@ Continue searching the parent directory? "))
     (error "Error: This buffer is not visited file.")))
 
 (defun helm-ag--ag-switch-to-do-ag (dir query)
-  (interactive (list default-directory helm-ag--last-query))
+  (interactive (list default-directory
+                     (or helm-ag--previous-last-query helm-ag--last-query)))
   ;; if we just converted from a helm regex to enter helm-ag from helm-do-ag
   (helm-run-after-exit (lambda () (helm-do-ag dir dir query))))
 
