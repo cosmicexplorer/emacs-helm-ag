@@ -928,6 +928,47 @@ Special commands:
             (helm-ag--switch-dir (file-name-directory file)))
         (error "no file on current line")))))
 
+(defmacro helm-ag--get-dir-query-and-switch (to-dir-form &rest body)
+  (declare (indent 1))
+  (let ((tmp-sym (cl-gensym))
+        (to-dir-sym (cl-first to-dir-form)))
+    `(let* ((,tmp-sym ,(cl-second to-dir-form))
+            (,to-dir-sym (if (symbolp ,tmp-sym) ,tmp-sym
+                           (expand-file-name ,tmp-sym))))
+       (if (eq ,to-dir-sym 'query-user)
+           (helm-run-after-exit
+            (lambda ()
+              (let ((,to-dir-sym
+                     (expand-file-name
+                      (read-directory-name
+                       "Directory to search: " nil nil t))))
+                ,@body)))
+         (helm-run-after-exit (lambda () ,@body))))))
+
+(defun helm-ag--switch-dir (to-directory)
+  (interactive (list 'query-user))
+  (let* ((initial-input helm-input)
+         (cur-src (helm-get-current-source))
+         (cur-buf (with-helm-buffer (current-buffer))))
+    (helm-ag--get-dir-query-and-switch (dir to-directory)
+      (let ((default-directory dir)
+            (helm-ag--default-directory dir))
+        (setq helm-ag--last-default-directory default-directory)
+        (helm-attrset 'name (helm-ag--helm-header dir) cur-src)
+        (helm :sources (list cur-src) :buffer cur-buf
+              :input initial-input)))))
+
+(defconst helm-ag--file-line-regexp "\\([^:]+\\):\\([0-9]+\\):")
+(defun helm-ag--goto-file-dir ()
+  (interactive)
+  (with-helm-buffer
+    (save-excursion
+      (goto-char (line-beginning-position))
+      (if (re-search-forward helm-ag--file-line-regexp nil t)
+          (let ((file (match-string 1)))
+            (helm-ag--switch-dir (or (file-name-directory file) ".")))
+        (error "no file on current line")))))
+
 (defvar helm-ag-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map helm-map)
