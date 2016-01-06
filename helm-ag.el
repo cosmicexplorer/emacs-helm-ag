@@ -567,18 +567,6 @@ regexp by inserting alternation (\\|) in between top-level groups."
          (concat "^[^:]+:[0-9]+:" (substring pattern 1)))
         (t pattern)))
 
-(defvar helm-ag-source
-  (let ((src
-         (helm-build-in-buffer-source "The Silver Searcher"
-           :init 'helm-ag--init
-           :real-to-display 'helm-ag--candidate-transformer
-           :persistent-action 'helm-ag--persistent-action
-           :fuzzy-match helm-ag-fuzzy-match
-           :action helm-ag--actions
-           :candidate-number-limit 9999)))
-    (setf (cdr (assoc 'search src)) '(helm-ag--buffer-search-fn))
-    src))
-
 ;;;###autoload
 (defun helm-ag-pop-stack ()
   (interactive)
@@ -897,11 +885,56 @@ Special commands:
   (helm-ag--move-file-common
    #'helm-end-of-source-p #'forward-line #'helm-beginning-of-buffer))
 
+(defmacro helm-ag--get-dir-query-and-switch (to-dir-form &rest body)
+  (declare (indent 1))
+  (let ((tmp-sym (cl-gensym))
+        (to-dir-sym (cl-first to-dir-form)))
+    `(let* ((,tmp-sym ,(cl-second to-dir-form))
+            (,to-dir-sym (if (symbolp ,tmp-sym) ,tmp-sym
+                           (expand-file-name ,tmp-sym))))
+       (if (eq ,to-dir-sym 'query-user)
+           (helm-run-after-exit
+            (lambda ()
+              (let ((,to-dir-sym
+                     (expand-file-name
+                      (read-directory-name
+                       "Directory to search: " nil nil t))))
+                ,@body)))
+         (helm-run-after-exit (lambda () ,@body))))))
+
+(defun helm-ag--switch-dir (to-directory)
+  (interactive (list 'query-user))
+  (let* ((initial-input helm-input)
+         (cur-src (helm-get-current-source))
+         (cur-buf (with-helm-buffer (current-buffer))))
+    (message "TO-DIR: %S" to-directory)
+    (helm-ag--get-dir-query-and-switch (dir to-directory)
+      (let ((default-directory dir)
+            (helm-ag--default-directory dir))
+        (setq helm-ag--last-default-directory default-directory)
+        (helm-attrset 'name (helm-ag--helm-header dir) cur-src)
+        (helm-ag--safe-do-helm
+         (helm :sources (list cur-src) :buffer cur-buf
+               :input initial-input))))))
+
+(defconst helm-ag--file-line-regexp "\\([^:]+\\):\\([0-9]+\\):")
+(defun helm-ag--goto-file-dir ()
+  (interactive)
+  (with-helm-buffer
+    (save-excursion
+      (goto-char (line-beginning-position))
+      (if (re-search-forward helm-ag--file-line-regexp nil t)
+          (let ((file (match-string 1)))
+            (helm-ag--switch-dir (file-name-directory file)))
+        (error "no file on current line")))))
+
 (defvar helm-ag-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map helm-map)
     (define-key map (kbd "C-c o") 'helm-ag--run-other-window-action)
     (define-key map (kbd "C-l") 'helm-ag--up-one-level)
+    (define-key map (kbd "C-c d") 'helm-ag--switch-dir)
+    (define-key map (kbd "C-c f") 'helm-ag--goto-file-dir)
     (define-key map (kbd "C-c C-e") 'helm-ag-edit)
     (define-key map (kbd "C-x C-s") 'helm-ag--run-save-buffer)
     (define-key map (kbd "C-c ?") 'helm-ag-help)
@@ -914,6 +947,19 @@ Special commands:
     map)
   "Keymap for `helm-ag'.")
 
+(defvar helm-ag-source
+  (let ((src
+         (helm-build-in-buffer-source "The Silver Searcher"
+           :init 'helm-ag--init
+           :real-to-display 'helm-ag--candidate-transformer
+           :persistent-action 'helm-ag--persistent-action
+           :fuzzy-match helm-ag-fuzzy-match
+           :action helm-ag--actions
+           :candidate-number-limit 9999
+           :keymap helm-ag-map)))
+    (setf (cdr (assoc 'search src)) '(helm-ag--buffer-search-fn))
+    src))
+
 (defsubst helm-ag--root-directory-p ()
   (cl-loop for dir in '(".git/" ".hg/")
            thereis (file-directory-p dir)))
@@ -923,16 +969,8 @@ Special commands:
   (if (or (not (helm-ag--root-directory-p))
           (y-or-n-p "Current directory might be the project root. \
 Continue searching the parent directory? "))
-      (let ((parent (file-name-directory (directory-file-name default-directory))))
-        (helm-run-after-exit
-         (lambda ()
-           (let* ((default-directory parent)
-                  (helm-ag--default-directory parent))
-             (setq helm-ag--last-default-directory default-directory)
-             (helm-attrset 'name (helm-ag--helm-header default-directory) helm-ag-source)
-             (helm-ag--safe-do-helm
-              (helm :sources '(helm-ag-source) :buffer "*helm-ag*"
-                    :keymap helm-ag-map))))))
+      (helm-ag--switch-dir
+       (file-name-directory (directory-file-name default-directory)))
     (message nil)))
 
 (defvar helm-ag--ag-or-do-ag nil)
@@ -959,8 +997,7 @@ Continue searching the parent directory? "))
        helm-ag-source)
       (let ((helm-ag--ag-or-do-ag 'ag))
         (helm-ag--safe-do-helm
-         (helm :sources '(helm-ag-source) :buffer "*helm-ag*"
-               :keymap helm-ag-map))))))
+         (helm :sources '(helm-ag-source) :buffer "*helm-ag*"))))))
 
 (defun helm-ag--split-string (str)
   (with-temp-buffer
@@ -1410,7 +1447,6 @@ advices, buffers, or hooks leak from the preview."
 (defvar helm-do-ag-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map helm-ag-map)
-    (define-key map (kbd "C-l") 'helm-ag--do-ag-up-one-level)
     (define-key map (kbd "C-c ?") 'helm-ag--do-ag-help)
     (define-key map (kbd "C-s") 'helm-ag--do-ag-switch-to-ag)
     map)
@@ -1424,7 +1460,8 @@ advices, buffers, or hooks leak from the preview."
     :action helm-ag--actions
     :nohighlight t
     :requires-pattern 3
-    :candidate-number-limit 9999))
+    :candidate-number-limit 9999
+    :keymap helm-do-ag-map))
 
 (defvar helm-ag--previous-last-query nil)
 (defun helm-ag--do-ag-switch-to-ag (dir query)
@@ -1439,25 +1476,6 @@ advices, buffers, or hooks leak from the preview."
         dir
         (helm-ag--join-patterns
          (cdr (helm-ag--parse-options-and-query real-query))))))))
-
-(defun helm-ag--do-ag-up-one-level ()
-  (interactive)
-  (if (or (not (helm-ag--root-directory-p))
-          (y-or-n-p "Current directory might be the project root. \
-Continue searching the parent directory? "))
-      (let ((parent (file-name-directory (directory-file-name default-directory)))
-            (initial-input helm-input))
-        (helm-run-after-exit
-         (lambda ()
-           (let ((default-directory parent)
-                 (helm-ag--default-directory parent))
-             (setq helm-ag--last-default-directory default-directory)
-             (helm-attrset 'name (helm-ag--helm-header parent)
-                           helm-source-do-ag)
-             (helm-ag--safe-do-helm
-              (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
-                    :input initial-input :keymap helm-do-ag-map))))))
-    (message nil)))
 
 (defun helm-ag--set-do-ag-option ()
   (when (or (< (prefix-numeric-value current-prefix-arg) 0)
@@ -1481,18 +1499,18 @@ Continue searching the parent directory? "))
   (and (listp targets) (= (length targets) 1) (file-directory-p (car targets))))
 
 (defun helm-do-ag--helm (&optional query)
-  (let ((helm-ag--default-directory
+  (let ((search-dir
          (cond ((not (helm-ag--windows-p)) helm-ag--default-directory)
                ((helm-do-ag--target-one-directory-p helm-ag--default-target)
                 (car helm-ag--default-target))
                (t helm-ag--default-directory))))
-    (helm-attrset 'name "The Silver Searcher" helm-source-do-ag)
+    (helm-attrset 'name (helm-ag--helm-header search-dir) helm-source-do-ag)
     (let ((helm-ag--ag-or-do-ag 'do-ag))
       (helm-ag--safe-do-helm
        (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
              :input (or query
-                        (helm-ag--insert-thing-at-point helm-ag-insert-at-point))
-             :keymap helm-do-ag-map)))))
+                        (helm-ag--insert-thing-at-point
+                         helm-ag-insert-at-point)))))))
 
 ;;;###autoload
 (defun helm-do-ag-this-file ()
