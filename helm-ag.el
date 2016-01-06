@@ -305,11 +305,12 @@ They are specified to `--ignore' options."
     (helm-highlight-current-line)))
 
 (defun helm-ag--validate-regexp (regexp)
-  (condition-case nil
-      (progn
-        (string-match-p regexp "")
-        t)
-    (invalid-regexp nil)))
+  (and (not (string= regexp ""))
+       (condition-case nil
+           (progn
+             (string-match-p regexp "")
+             t)
+         (invalid-regexp nil))))
 
 (defun helm-ag--pcre-to-elisp-regexp (pcre)
   ;; This is very simple conversion
