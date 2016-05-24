@@ -1358,49 +1358,64 @@ deleted afterwards.")
 (defvar helm-ag--new-buffers-opened-for-preview nil
   "List of all buffers newly opened with `find-file-noselect' within
 `helm-ag--display-preview' so that they can be killed afterwards.")
+
+(defcustom helm-ag-do-display-preview t
+  "Whether to display a preview immediately upon visiting a line using
+`helm-ag--display-preview'."
+  :group 'helm-ag)
+
+(defun helm-ag-toggle-display-preview ()
+  "Toggle the value of `helm-ag-do-display-preview'."
+  (interactive)
+  (let ((new
+         (setq helm-ag-do-display-preview (not helm-ag-do-display-preview))))
+    (message "displaying preview in helm-ag: %s"
+             (if helm-ag-do-display-preview "on" "off"))))
+
 (defun helm-ag--display-preview ()
   "Display a preview of some sort of the selected match. Create or refresh
 overlays highlighting text of matches in the matching buffer."
-  (with-helm-window
-    (let* ((str (helm-ag--get-string-at-line))
-           (match (string-match "^\\([^:]+\\):\\([0-9]+\\):" str)))
-      (when match
-        (let* ((file (match-string 1 str))
-               (line (string-to-number (match-string 2 str)))
-               (buf-displaying-file
-                (or (get-file-buffer file)
-                    (let ((buf (find-file-noselect file)))
-                      (push buf helm-ag--new-buffers-opened-for-preview)
-                      buf))))
-          (add-to-list 'helm-ag--buffers-displayed buf-displaying-file)
-          (with-selected-window helm-ag--original-window
-            (switch-to-buffer buf-displaying-file)
-            (goto-char (point-min))
-            (forward-line (1- line))
-            (when helm-ag--preview-highlight-matches
-              (helm-ag--display-preview-line-overlay
-               helm-ag--preview-overlay buf-displaying-file line))
-            (unless (or (and (eq helm-ag--previous-preview-buffer
-                                 buf-displaying-file)
-                             (string-equal helm-ag--previous-minibuffer-pattern
-                                           helm-pattern)
-                             (and helm-ag--previous-line
-                                  (= helm-ag--previous-line line)))
-                        (memq helm-ag--preview-highlight-matches
-                              `(nil line-only)))
-              (cond ((eq helm-ag--preview-highlight-matches
-                         'highlight-matches-current-line)
-                     (helm-ag--refresh-overlays-in-region
-                      (line-beginning-position) (line-end-position)))
-                    ((eq helm-ag--preview-highlight-matches 'any)
-                     (helm-ag--refresh-overlays-in-region
-                      (point-min) (point-max)))
-                    (t (error "Invalid selection for
+  (when helm-ag-do-display-preview
+    (with-helm-window
+      (let* ((str (helm-ag--get-string-at-line))
+             (match (string-match "^\\([^:]+\\):\\([0-9]+\\):" str)))
+        (when match
+          (let* ((file (match-string 1 str))
+                 (line (string-to-number (match-string 2 str)))
+                 (buf-displaying-file
+                  (or (get-file-buffer file)
+                      (let ((buf (find-file-noselect file)))
+                        (push buf helm-ag--new-buffers-opened-for-preview)
+                        buf))))
+            (add-to-list 'helm-ag--buffers-displayed buf-displaying-file)
+            (with-selected-window helm-ag--original-window
+              (switch-to-buffer buf-displaying-file)
+              (goto-char (point-min))
+              (forward-line (1- line))
+              (when helm-ag--preview-highlight-matches
+                (helm-ag--display-preview-line-overlay
+                 helm-ag--preview-overlay buf-displaying-file line))
+              (unless (or (and (eq helm-ag--previous-preview-buffer
+                                   buf-displaying-file)
+                               (string-equal helm-ag--previous-minibuffer-pattern
+                                             helm-pattern)
+                               (and helm-ag--previous-line
+                                    (= helm-ag--previous-line line)))
+                          (memq helm-ag--preview-highlight-matches
+                                `(nil line-only)))
+                (cond ((eq helm-ag--preview-highlight-matches
+                           'highlight-matches-current-line)
+                       (helm-ag--refresh-overlays-in-region
+                        (line-beginning-position) (line-end-position)))
+                      ((eq helm-ag--preview-highlight-matches 'any)
+                       (helm-ag--refresh-overlays-in-region
+                        (point-min) (point-max)))
+                      (t (error "Invalid selection for
 helm-ag--preview-highlight-matches!"))))
-            (helm-ag--recenter))
-          (setq helm-ag--previous-preview-buffer buf-displaying-file
-                helm-ag--previous-minibuffer-pattern helm-pattern
-                helm-ag--previous-line line))))))
+              (helm-ag--recenter))
+            (setq helm-ag--previous-preview-buffer buf-displaying-file
+                  helm-ag--previous-minibuffer-pattern helm-pattern
+                  helm-ag--previous-line line)))))))
 
 (defvar helm-ag--disabled-advices-alist nil
   "List of disabled advices enabled during a `helm-ag' session, and disabled at
