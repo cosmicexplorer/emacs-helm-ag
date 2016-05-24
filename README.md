@@ -23,9 +23,7 @@
 
 * Emacs 24 or higher
 * helm 1.7.7 or higher
-* [The Silver Searcher](https://github.com/ggreer/the_silver_searcher) 0.25 or higher.
-
-You may be able to use older version ag however I recommend you to use newer ag for using all features of `helm-ag`.
+* [The Silver Searcher](https://github.com/ggreer/the_silver_searcher) 0.29.0 or higher.
 
 ## Installation
 
@@ -88,6 +86,16 @@ Move to point before jump
 Clear context stack
 
 
+## Enable helm-follow-mode by default
+
+Please set `helm-follow-mode-persistent` to non-nil if you want to use `helm-follow-mode` by default. You must set it before loading `helm-ag.el`.
+
+``` lisp
+(custom-set-variables
+ '(helm-follow-mode-persistent t))
+```
+
+
 ## Persistent action
 
 You can see file content temporarily by persistent action(`C-j`).
@@ -124,6 +132,10 @@ Pattern: -- --count
 Search pattern is `--count`.
 `helm-ag` treats words after `--` as search pattern.
 
+#### Search meta characters as literal
+
+`ag`(`ack`, `pt`) takes Perl compatible PCRE so that you need to escape meta characters
+likes brackets, braces, asterisk, when you search them as literals.
 
 ## Customize
 

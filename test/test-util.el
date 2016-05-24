@@ -1,6 +1,6 @@
 ;;; test-util.el --- test helm-ag utility functions
 
-;; Copyright (C) 2014 by Syohei YOSHIDA
+;; Copyright (C) 2016 by Syohei YOSHIDA
 
 ;; Author: Syohei YOSHIDA <syohex@gmail.com>
 
@@ -23,6 +23,7 @@
 
 (require 'ert)
 (require 'helm-ag)
+(require 'cl-lib)
 
 (ert-deftest parse-query ()
   "Parsing input which may contains option"
@@ -128,6 +129,13 @@
       (let* ((got (helm-ag--construct-do-ag-command "somepattern"))
              (expected '("ag" "--nocolor" "--nogroup" "--ignore-case" "--all-text"
                          "--" "somepattern")))
+        (should (equal got expected))))
+
+    (let ((helm-ag-ignore-patterns '("apple" "orange")))
+      (helm-ag--do-ag-set-command)
+      (let* ((got (helm-ag--construct-do-ag-command "somepattern"))
+             (expected '("ag" "--nocolor" "--nogroup" "--ignore=apple" "--ignore=orange"
+                         "--" "somepattern")))
         (should (equal got expected))))))
 
 (ert-deftest construct-do-ag-command-with-extra-option ()
@@ -231,5 +239,32 @@
     (should (equal (helm-ag--join-patterns "foo bar") "(?=.*foo.*)(?=.*bar.*)"))
     (should (equal (helm-ag--join-patterns "foo !") "(?=.*foo.*)(?=.*!.*)"))
     (should (equal (helm-ag--join-patterns "foo !bar") "(?=.*foo.*)(?=^(?!.*bar).+$)"))))
+
+(ert-deftest search-this-file-p ()
+  "Ag does not show file name at searching only one file except '--vimgrep'
+option specified"
+  (let ((helm-ag--last-command '("--vimgrep")))
+    (should-not (helm-ag--search-this-file-p)))
+
+  (cl-letf (((symbol-function 'helm-get-current-source)
+             (lambda () 'helm-source-ag))
+            ((symbol-function 'helm-attr)
+             (lambda (attr &optional source compute)
+               t)))
+    (should (helm-ag--search-this-file-p)))
+
+  (cl-letf (((symbol-function 'helm-get-current-source)
+             (lambda () 'helm-source-do-ag))
+            ((symbol-function 'helm-attr)
+             (lambda (attr &optional source compute)
+               t)))
+    (let ((helm-ag--default-target '("a.txt" "b.txt")))
+      (should-not (helm-ag--search-this-file-p)))
+
+    (let ((helm-ag--default-target (list default-directory)))
+      (should-not (helm-ag--search-this-file-p)))
+
+    (let ((helm-ag--default-target '("a.txt")))
+      (should (helm-ag--search-this-file-p)))))
 
 ;;; test-util.el ends here
