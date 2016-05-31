@@ -174,6 +174,7 @@ a `helm-ag' or `helm-do-ag' session.")
 (defvar helm-ag--extra-options nil)
 (defvar helm-ag--extra-options-history nil)
 (defvar helm-ag--original-window nil)
+(defvar helm-ag--original-buffer nil)
 (defvar helm-ag--search-this-file-p nil)
 (defvar helm-ag--default-target nil)
 (defvar helm-ag--buffer-search nil)
@@ -638,7 +639,8 @@ regexp by inserting alternation (\\|) in between top-level groups."
        (helm :sources '(helm-ag-source) :buffer "*helm-ag*")))))
 
 (defsubst helm-ag--init-state ()
-  (setq helm-ag--original-window (selected-window)
+  (setq helm-ag--original-buffer (current-buffer)
+        helm-ag--original-window (selected-window)
         helm-ag--last-default-directory nil))
 
 (defun helm-ag--get-default-directory ()
@@ -1434,6 +1436,7 @@ deleted afterwards.")
 (defcustom helm-ag-do-display-preview t
   "Whether to display a preview immediately upon visiting a line using
 `helm-ag--display-preview'."
+  :safe 'booleanp
   :group 'helm-ag)
 
 (defun helm-ag-toggle-display-preview ()
@@ -1447,7 +1450,8 @@ deleted afterwards.")
 (defun helm-ag--display-preview ()
   "Display a preview of some sort of the selected match. Create or refresh
 overlays highlighting text of matches in the matching buffer."
-  (when helm-ag-do-display-preview
+  (when (with-current-buffer helm-ag--original-buffer
+          helm-ag-do-display-preview)
     (with-helm-window
       (let* ((str (helm-ag--get-string-at-line))
              (match (string-match "^\\([^:]+\\):\\([0-9]+\\):" str)))
