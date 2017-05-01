@@ -524,12 +524,6 @@ regexp by inserting alternation (\\|) in between top-level groups."
             (setq last-pos (1+ (match-end 0)))))))
     candidate))
 
-(defun helm-ag--candidate-transform-for-this-file (candidate)
-  (when (string-match "\\`\\([^:]+\\):\\(.*\\)" candidate)
-    (format "%s:%s"
-            (propertize (match-string 1 candidate) 'face 'helm-grep-lineno)
-            (helm-ag--highlight-candidate (match-string 2 candidate)))))
-
 (defun helm-ag--candidate-transform-for-files (candidate)
   (helm-aif (helm-grep-split-line candidate)
       (format "%s:%s:%s"
@@ -590,24 +584,6 @@ regexp by inserting alternation (\\|) in between top-level groups."
            for counter = 0 then (1+ counter)
            collect (if (zerop (% counter 2)) el
                      (funcall fn el))))
-
-(defun helm-ag--convert-helm-to-regexps (pattern)
-  (helm-aif (gethash pattern helm-ag--buffer-search-cache) it
-    (let* ((reg-pos-neg (helm-ag--parse-helm-input pattern))
-           (result
-            (helm-ag--plist-map #'helm-ag--filter-helm-patterns reg-pos-neg)))
-      (when (> (hash-table-size helm-ag--buffer-search-cache)
-               helm-ag--cache-size)
-        (clrhash helm-ag--buffer-search-cache))
-      (puthash pattern result helm-ag--buffer-search-cache)
-      result)))
-
-(defun helm-ag--buffer-search-fn (pattern)
-  (let* ((fixed-pattern (string-trim pattern))
-         (pos-neg-regexps (helm-ag--convert-helm-to-regexps fixed-pattern)))
-    (let ((pos-reg (plist-get pos-neg-regexps :positive))
-          (neg-reg (plist-get pos-neg-regexps :negative)))
-      (helm-ag--search-next-match-pos-neg pos-reg neg-reg))))
 
 (defun helm-ag--add-header-for-carat (pattern &optional helm-buf)
   (cond
@@ -1089,20 +1065,6 @@ Special commands:
     (define-key map (kbd "<left>") 'helm-ag--previous-file)
     map)
   "Keymap for `helm-ag'.")
-
-(defvar helm-ag-source
-  (let ((src
-         (helm-build-in-buffer-source "The Silver Searcher"
-           :init 'helm-ag--init
-           :real-to-display 'helm-ag--candidate-transformer
-           :persistent-action 'helm-ag--persistent-action
-           :fuzzy-match helm-ag-fuzzy-match
-           :action helm-ag--actions
-           :candidate-number-limit 9999
-           :history 'helm-ag--helm-history
-           :keymap helm-ag-map)))
-    (setf (cdr (assoc 'search src)) '(helm-ag--buffer-search-fn))
-    src))
 
 (defsubst helm-ag--root-directory-p ()
   (cl-loop for dir in '(".git/" ".hg/")
