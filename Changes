@@ -1,5 +1,24 @@
 Revision history for helm-ag.el
 
+Revision 0.58 2017/02/10 syohex
+   - Better input UX
+   - Fix default directory of save buffer issue
+   - Set own history variables
+   - Better support multiple search programs
+
+Revision 0.57 2016/10/10 syohex
+   - Add customize variable of ignore buffer(#270)
+   - Drop Emacs 24.3 support
+   - Improve helm header format(#262)
+   - Use shorter name for buffer searching commands(#258)
+   - Set key mapping attribute at runtime(#253)
+   - Fix missing key binding setting(#250)
+
+Revision 0.56 2016/06/15 syohex
+   - Kill non-opened buffers after editing mode finished(#248)
+   - De-activate mark when using region as input query
+   - Fix changing position in sentinel function issue(#242)
+
 Revision 0.55 2016/05/15 syohex
    - Fix keymap setting for calling commands from helm-resume(#240)
    - Set default input of helm-do-ag same as helm-ag(#237)

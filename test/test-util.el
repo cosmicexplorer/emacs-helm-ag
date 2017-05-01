@@ -1,6 +1,6 @@
 ;;; test-util.el --- test helm-ag utility functions
 
-;; Copyright (C) 2016 by Syohei YOSHIDA
+;; Copyright (C) 2017 by Syohei YOSHIDA
 
 ;; Author: Syohei YOSHIDA <syohex@gmail.com>
 
@@ -107,35 +107,41 @@
   (let ((helm-ag-base-command "ag --nocolor --nogroup"))
     (helm-ag--do-ag-set-command)
     (let ((got (helm-ag--construct-do-ag-command "somepattern"))
-          (expected '("ag" "--nocolor" "--nogroup" "--" "somepattern")))
+          (expected '("ag" "--nocolor" "--nogroup" "somepattern")))
       (should (equal got expected)))
 
-    (let ((got (helm-ag--construct-do-ag-command "pat1 pat2"))
-          (expected '("ag" "--nocolor" "--nogroup" "--" "(?=.*pat1.*)(?=.*pat2.*)")))
-      (should (equal got expected)))
-
-    (let* ((helm-ag--command-feature 'pt)
+    (let* ((helm-ag--command-features '())  ;; unknown pattern
            (got (helm-ag--construct-do-ag-command "pat1 pat2"))
-           (expected '("ag" "--nocolor" "--nogroup" "--" "pat1 pat2")))
+           (expected '("ag" "--nocolor" "--nogroup" "pat1 pat2")))
       (should (equal got expected)))
 
-    (let* ((helm-ag--command-feature 'pt-regexp)
+    (let* ((helm-ag--command-features '(fixed))
            (got (helm-ag--construct-do-ag-command "pat1 pat2"))
-           (expected '("ag" "--nocolor" "--nogroup" "--" "pat1.*pat2")))
+           (expected '("ag" "--nocolor" "--nogroup" "pat1 pat2")))
+      (should (equal got expected)))
+
+    (let* ((helm-ag--command-features '(re2))
+           (got (helm-ag--construct-do-ag-command "pat1 pat2"))
+           (expected '("ag" "--nocolor" "--nogroup" "pat1.*pat2")))
+      (should (equal got expected)))
+
+    (let* ((helm-ag--command-features '(pcre))
+           (got (helm-ag--construct-do-ag-command "pat1 pat2"))
+           (expected '("ag" "--nocolor" "--nogroup" "(?=.*pat1.*)(?=.*pat2.*)")))
       (should (equal got expected)))
 
     (let ((helm-ag-command-option "--ignore-case --all-text"))
       (helm-ag--do-ag-set-command)
       (let* ((got (helm-ag--construct-do-ag-command "somepattern"))
              (expected '("ag" "--nocolor" "--nogroup" "--ignore-case" "--all-text"
-                         "--" "somepattern")))
+                         "somepattern")))
         (should (equal got expected))))
 
     (let ((helm-ag-ignore-patterns '("apple" "orange")))
       (helm-ag--do-ag-set-command)
       (let* ((got (helm-ag--construct-do-ag-command "somepattern"))
              (expected '("ag" "--nocolor" "--nogroup" "--ignore=apple" "--ignore=orange"
-                         "--" "somepattern")))
+                         "somepattern")))
         (should (equal got expected))))))
 
 (ert-deftest construct-do-ag-command-with-extra-option ()
@@ -144,7 +150,7 @@
         (helm-ag--extra-options "-G\\.md$"))
     (helm-ag--do-ag-set-command)
     (let ((got (helm-ag--construct-do-ag-command "somepattern"))
-          (expected '("ag" "--nocolor" "--nogroup" "-G\\.md$" "--" "somepattern")))
+          (expected '("ag" "--nocolor" "--nogroup" "-G\\.md$" "somepattern")))
       (should (equal got expected)))))
 
 (ert-deftest validate-regexp-with-valid-regexp ()
@@ -223,15 +229,19 @@
 
 (ert-deftest join-pattern ()
   "Convert pattern like normal helm command in helm-do-ag"
-  (let ((helm-ag--command-feature 'pt))
+  (let ((helm-ag--command-features '()))  ;; unknown pattern
     (should (equal (helm-ag--join-patterns "foo") "foo"))
     (should (equal (helm-ag--join-patterns "foo bar") "foo bar")))
 
-  (let ((helm-ag--command-feature 'pt-regexp))
+  (let ((helm-ag--command-features '(fixed)))
+    (should (equal (helm-ag--join-patterns "foo") "foo"))
+    (should (equal (helm-ag--join-patterns "foo bar") "foo bar")))
+
+  (let ((helm-ag--command-features '(re2)))
     (should (equal (helm-ag--join-patterns "foo") "foo"))
     (should (equal (helm-ag--join-patterns "foo bar") "foo.*bar")))
 
-  (let ((helm-ag--command-feature nil))
+  (let ((helm-ag--command-features '(pcre)))
     (should (equal (helm-ag--join-patterns "foo") "foo"))
     (should (equal (helm-ag--join-patterns "!") "!"))
     (should (equal (helm-ag--join-patterns "!foo") "^(?!.*foo).+$"))
@@ -266,5 +276,57 @@ option specified"
 
     (let ((helm-ag--default-target '("a.txt")))
       (should (helm-ag--search-this-file-p)))))
+
+(ert-deftest visited-buffers ()
+  "Remove buffers which are matched against helm-ag-ignore-buffer-patterns"
+  (cl-letf (((symbol-function 'buffer-list)
+             (lambda () '("aa.txt" "bb.md" "cc.el")))
+            ((symbol-function 'buffer-file-name)
+             (lambda (b) b))
+            ((symbol-function 'buffer-name)
+             (lambda (b) b)))
+    (let* ((helm-ag-ignore-buffer-patterns nil)
+           (got (helm-ag--file-visited-buffers)))
+      (should (equal got '("aa.txt" "bb.md" "cc.el"))))
+
+    (let* ((helm-ag-ignore-buffer-patterns '("\\.md\\'" "\\`cc"))
+           (got (helm-ag--file-visited-buffers)))
+      (should (equal got '("aa.txt"))))))
+
+(ert-deftest set-command-features ()
+  "Set search command features to `helm-ag--command-features'"
+
+  ;; ack
+  (dolist (expected '(("-Q" . fixed)
+                      ("--literal" . fixed)
+                      ("-Quiet" . pcre)))
+    (let ((helm-ag-base-command (concat "ack " (car expected))))
+      (helm-ag--set-command-features)
+      (should (memq (cdr expected) helm-ag--command-features))))
+
+  ;; ag
+  (dolist (expected '(("-Q" . fixed)
+                      ("--literal" . fixed)
+                      ("-F" . fixed)
+                      ("--fixed-strings" . fixed)
+                      ("-False" . pcre)))
+    (let ((helm-ag-base-command (concat "ag " (car expected))))
+      (helm-ag--set-command-features)
+      (should (memq (cdr expected) helm-ag--command-features))))
+
+  ;; pt
+  (dolist (expected '(("-e" . re2)
+                      ("--eee" . fixed)))
+    (let ((helm-ag-base-command (concat "pt " (car expected))))
+      (helm-ag--set-command-features)
+      (should (memq (cdr expected) helm-ag--command-features))))
+
+  ;; rg
+  (dolist (expected '(("-F" . fixed)
+                      ("--fixed-strings" . fixed)
+                      ("--fixed-stringssss" . re2)))
+    (let ((helm-ag-base-command (concat "rg " (car expected))))
+      (helm-ag--set-command-features)
+      (should (memq (cdr expected) helm-ag--command-features)))))
 
 ;;; test-util.el ends here
