@@ -187,6 +187,7 @@ a `helm-ag' or `helm-do-ag' session.")
 (defvar helm-ag--buffer-search nil)
 (defvar helm-ag--command-features '())
 (defvar helm-ag--ignore-case nil)
+(defvar helm-ag--converted-patterns nil)
 (defvar helm-do-ag--extensions nil)
 (defvar helm-do-ag--commands nil)
 
@@ -229,43 +230,39 @@ a `helm-ag' or `helm-do-ag' session.")
            collect (helm-ag--construct-ignore-option ignore)))
 
 (defun helm-ag--parse-options-and-query (input)
-  (with-temp-buffer
-    (insert input)
-    (let (end options)
-      (goto-char (point-min))
-      (when (re-search-forward "\\s-*--\\s-+" nil t)
-        (setq end (match-end 0)))
-      (goto-char (point-min))
-      (while (re-search-forward "\\(?:^\\|\\s-+\\)\\(-\\S-+\\)\\(?:\\s-+\\|$\\)" end t)
-        (push (match-string-no-properties 1) options)
-        (when end
-          (cl-decf end (- (match-end 0) (match-beginning 0))))
-        (replace-match ""))
-      (cons options (buffer-string)))))
+  ;; NOTE: we don't attempt to interpret any options
+  (cons nil input))
 
-(defsubst helm-ag--parse-helm-input (input)
-  (helm-ag--replace-lookarounds
-   (helm-ag--pcre-to-elisp-regexp
-    (helm-ag--join-patterns
-     (if helm-ag-use-emacs-lisp-regexp
-         (helm-ag--elisp-regexp-to-pcre input)
-       input)))))
+(defun helm-ag--flip-regex-type (converted to-type)
+  (if helm-ag-use-emacs-lisp-regexp
+      (cl-ecase to-type
+        (elisp converted)
+        (pcre (helm-ag--plist-map
+               (lambda (res)
+                 (cl-mapcar #'helm-ag--elisp-regexp-to-pcre res))
+               converted)))
+    (cl-ecase to-type
+      (pcre converted)
+      (elisp (helm-ag--plist-map
+              (lambda (res)
+                (cl-mapcar #'helm-ag--pcre-to-elisp-regexp res))
+              converted)))))
 
 (defun helm-ag--parse-query (input)
-  (let* ((parsed (helm-ag--parse-options-and-query input))
-         (options (car parsed))
-         (query (cdr parsed)))
-    (setq helm-ag--last-query query)
-    (setq helm-ag--elisp-regexp-query
-          (helm-ag--parse-helm-input query))
-    (setq helm-ag--valid-regexp-for-emacs
-          (let ((pos (plist-get helm-ag--elisp-regexp-query :positive))
-                (neg (plist-get helm-ag--elisp-regexp-query :negative)))
-            (and (cl-every #'helm-ag--validate-regexp pos)
-                 (cl-every #'helm-ag--validate-regexp neg))))
-    (if (not options)
-        (list query)
-      (nconc (nreverse options) (list query)))))
+  (cl-destructuring-bind (options . query)
+      (helm-ag--parse-options-and-query input)
+    (setq helm-ag--last-query input
+          helm-ag--converted-patterns
+          (helm-ag--convert-invert-pattern query)
+          helm-ag--elisp-regexp-query
+          (helm-ag--flip-regex-type helm-ag--converted-patterns 'elisp)
+          helm-ag--valid-regexp-for-emacs
+          (cl-every #'helm-ag--validate-regexp
+                    (plist-get helm-ag--elisp-regexp-query :positive)))
+    (append options
+            (list
+             (helm-ag--join-patterns
+              (helm-ag--flip-regex-type helm-ag--converted-patterns 'pcre))))))
 
 (defsubst helm-ag--search-buffer-p (bufname)
   (cl-loop for regexp in helm-ag-ignore-buffer-patterns
@@ -1182,42 +1179,30 @@ Continue searching the parent directory? "))
         pattern
       (concat pattern ".*"))))
 
-(defsubst helm-ag--convert-invert-pattern (pattern)
-  (when (and (memq 'pcre helm-ag--command-features)
-             (string-prefix-p "!" pattern) (> (length pattern) 1))
-    (concat "^(?!" (helm-ag--add-anchor-tags (substring pattern 1) t) ").+$")))
+(defun helm-ag--convert-invert-pattern (pattern)
+  (cl-loop for pat in (helm-ag--split-string pattern)
+           do (string-match "\\`\\(!\\)?\\(.*\\)\\'" pat)
+           for res = (match-string 2 pat)
+           if (match-string 1 pat)
+           collect res into neg
+           else collect res into pos
+           finally return (list :positive pos :negative neg)))
 
-(defconst helm-ag--recognized-cmd-features '(re2 pcre))
-
-(defun helm-ag--join-patterns (input)
-  (let ((patterns (helm-ag--split-string input))
-        (features (cl-intersection
-                   helm-ag--command-features
-                   helm-ag--recognized-cmd-features)))
-    (if (= (length patterns) 1)
-        (or (helm-ag--convert-invert-pattern (car patterns))
-            (car patterns))
-      (cl-case (car features)
-        (re2 (string-join patterns ".*"))
-        (pcre
-         (cl-loop for s in patterns
-                  concat (format "(?=%s)"
-                                 (if (helm-ag--convert-invert-pattern s) it
-                                   (helm-ag--add-anchor-tags s)))
-                  into str
-                  finally return str))
-        (otherwise input)))))
-
-(defun helm-ag--do-ag-highlight-patterns (input)
-  (helm-ag--replace-lookarounds
-   (helm-ag--join-patterns input)))
+(defun helm-ag--join-patterns (converted)
+  (let ((pos-pats
+         (cl-loop for p-pat in (plist-get converted :positive)
+                  collect (format "(?=.*%s.*)" p-pat)))
+        (neg-pats
+         (cl-loop for n-pat in (plist-get converted :negative)
+                  collect (format "(?!.*%s.*)" n-pat))))
+    (mapconcat #'identity (append pos-pats neg-pats) "")))
 
 (defun helm-ag--propertize-candidates (input)
   (save-excursion
     (goto-char (point-min))
     (forward-line 1)
     (cl-loop
-     with patterns = (plist-get (helm-ag--do-ag-highlight-patterns input) :positive)
+     with patterns = (plist-get helm-ag--elisp-regexp-query :positive)
      with one-file-p = (and (not (helm-ag--vimgrep-option))
                             (helm-ag--search-only-one-file-p))
      while (not (eobp))
@@ -1241,19 +1226,21 @@ Continue searching the parent directory? "))
              for last-point = (point)
              unless (string-empty-p pattern)
              do (progn
-                  (if (char-equal (aref pattern 0) ?^)
-                      (save-excursion
-                        (goto-char curpoint)
-                        (when (looking-at (substring pattern 1))
-                          (set-text-properties
-                           (match-beginning 0) (match-end 0)
-                           '(face helm-match))))
-                    (while (re-search-forward pattern bound t)
-                      (set-text-properties (match-beginning 0) (match-end 0)
-                                           '(face helm-match))
-                      (when (= last-point (point))
-                        (forward-char 1))
-                      (setq last-point (point))))
+                  (condition-case _
+                      (if (char-equal (aref pattern 0) ?^)
+                          (save-excursion
+                            (goto-char curpoint)
+                            (when (looking-at (substring pattern 1))
+                              (set-text-properties
+                               (match-beginning 0) (match-end 0)
+                               '(face helm-match))))
+                        (while (re-search-forward pattern bound t)
+                          (set-text-properties (match-beginning 0) (match-end 0)
+                                               '(face helm-match))
+                          (when (= last-point (point))
+                            (forward-char 1))
+                          (setq last-point (point))))
+                    (invalid-regexp nil))
                   (goto-char curpoint))))
           (put-text-property start bound 'helm-cand-num num)
           (forward-line 1)))))
@@ -1285,25 +1272,6 @@ Continue searching the parent directory? "))
                          "\\*" ""
                          (replace-regexp-in-string "\\." "\\\\." ext)))))
 
-(defun helm-ag--show-result-p (options has-query)
-  (or has-query
-      (cl-loop for opt in options
-               thereis (string-prefix-p "-g" opt))))
-
-(defun helm-ag--construct-do-ag-command (pattern)
-  (cl-destructuring-bind (options . query)
-      (helm-ag--parse-options-and-query pattern)
-    (let ((has-query (not (string-empty-p query)))
-          (final-pattern
-           (helm-ag--join-patterns
-            (if helm-ag-use-emacs-lisp-regexp
-                (helm-ag--elisp-regexp-to-pcre query)
-              query))))
-      (when (helm-ag--show-result-p options has-query)
-        (append (car helm-do-ag--commands)
-                options
-                (and has-query (list final-pattern)))))))
-
 (defun helm-ag--do-ag-set-command ()
   (let ((cmd-opts (split-string helm-ag-base-command nil t)))
     (when helm-ag-command-option
@@ -1334,7 +1302,8 @@ Continue searching the parent directory? "))
          (default-directory (or helm-ag--default-directory
                                 helm-ag--last-default-directory
                                 default-directory))
-         (cmd-args (helm-ag--construct-do-ag-command helm-pattern)))
+         (cmd-args (append (car helm-do-ag--commands)
+                           (helm-ag--parse-query helm-pattern))))
     (when cmd-args
       (let ((proc (apply #'start-file-process "helm-do-ag" nil cmd-args)))
         (setq helm-ag--last-query helm-pattern
@@ -1373,10 +1342,13 @@ Continue searching the parent directory? "))
 (defsubst helm-ag--delete-overlays (olays) (mapc #'delete-overlay olays))
 
 (defun helm-ag--find-next-match-overlays (end pos-reg neg-reg)
-  (cl-block found
-    (while (re-search-forward pos-reg end t)
-      (when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
-        (cl-return-from found t)))))
+  (condition-case _
+      (cl-loop
+       while (re-search-forward pos-reg end t)
+       when (not (string-match-p neg-reg (helm-ag--get-string-at-line)))
+       return t
+       finally return nil)
+    (invalid-regexp nil)))
 
 (defun helm-ag--make-overlays (beg end regexp face)
   "Apply an overlay to all matches between BEG and END of REGEXP with face
@@ -1457,10 +1429,14 @@ buffer as `helm-ag' highlights their matches.")
                  (cl-ecase helm-ag--ag-or-do-ag
                    (ag (or helm-ag--last-query ""))
                    (do-ag helm-pattern))))
-           (helm-ag--parse-helm-input primary-reg))
+           (helm-ag--flip-regex-type
+            (helm-ag--convert-invert-pattern primary-reg)
+            'elisp))
          'helm-ag-process-pattern-match
          (when (eq helm-ag--ag-or-do-ag 'ag)
-           (helm-ag--parse-helm-input helm-pattern))
+           (helm-ag--flip-regex-type
+            (helm-ag--convert-invert-pattern helm-pattern)
+            'elisp))
          'helm-ag-minibuffer-match)))
 
 (defun helm-ag--refresh-listing-overlays ()
