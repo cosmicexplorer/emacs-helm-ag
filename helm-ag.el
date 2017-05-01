@@ -1189,8 +1189,11 @@ Continue searching the parent directory? "))
 
 (defconst helm-ag--recognized-cmd-features '(re2 pcre))
 
-(defun helm-ag--join-patterns (input features)
-  (let ((patterns (helm-ag--split-string input)))
+(defun helm-ag--join-patterns (input)
+  (let ((patterns (helm-ag--split-string input))
+        (features (cl-intersection
+                   helm-ag--command-features
+                   helm-ag--recognized-cmd-features)))
     (if (= (length patterns) 1)
         (or (helm-ag--convert-invert-pattern (car patterns))
             (car patterns))
@@ -1198,19 +1201,16 @@ Continue searching the parent directory? "))
         (re2 (string-join patterns ".*"))
         (pcre
          (cl-loop for s in patterns
-                  if (helm-ag--convert-invert-pattern s)
-                  concat (concat "(?=" it ")")
-                  else concat (concat "(?=" (helm-ag--add-anchor-tags s) ")")))
+                  concat (format "(?=%s)"
+                                 (if (helm-ag--convert-invert-pattern s) it
+                                   (helm-ag--add-anchor-tags s)))
+                  into str
+                  finally return str))
         (otherwise input)))))
 
 (defun helm-ag--do-ag-highlight-patterns (input)
-  (let ((reg (helm-ag--join-patterns input))
-        (features
-         (cl-intersection
-          helm-ag--command-features helm-ag--recognized-cmd-features)))
-    (if features (list :positive reg)
-      (helm-ag--replace-lookarounds
-       (helm-ag--pcre-to-elisp-regexp reg)))))
+  (helm-ag--replace-lookarounds
+   (helm-ag--join-patterns input)))
 
 (defun helm-ag--propertize-candidates (input)
   (save-excursion
@@ -1729,7 +1729,7 @@ advices, buffers, or hooks leak from the preview."
       (helm-ag--safe-do-helm
        (helm :sources '(helm-source-do-ag) :buffer "*helm-ag*"
              :input (or query
-                        (helm-ag--marked-input)
+                        (helm-ag--marked-input t)
                         (helm-ag--insert-thing-at-point
                          helm-ag-insert-at-point)))))))
 
