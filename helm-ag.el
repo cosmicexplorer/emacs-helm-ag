@@ -578,8 +578,12 @@ regexp by inserting alternation (\\|) in between top-level groups."
 (defvar helm-ag--buffer-search-cache (make-hash-table :test 'equal))
 (defconst helm-ag--cache-size 10000)
 
-(defun helm-ag--filter-helm-patterns (patterns)
-  (cl-remove-if #'null (cl-mapcar #'helm-ag--add-header-for-carat patterns)))
+(cl-defun helm-ag--filter-helm-patterns (patterns &optional (helm-buf t))
+  (cl-remove-if
+   #'null
+   (cl-mapcar
+    (lambda (pat) (helm-ag--add-header-for-carat pat helm-buf))
+    patterns)))
 
 (defun helm-ag--plist-map (fn plist)
   (cl-loop for el in plist
@@ -605,14 +609,13 @@ regexp by inserting alternation (\\|) in between top-level groups."
           (neg-reg (plist-get pos-neg-regexps :negative)))
       (helm-ag--search-next-match-pos-neg pos-reg neg-reg))))
 
-(defun helm-ag--add-header-for-carat (pattern)
-  (cond ((or (string= pattern "^")
-             (string= pattern "$")
-             (string= pattern ""))
-         nil)
-        ((char-equal (aref pattern 0) ?^)
-         (concat "^[^:]+:[0-9]+:" (substring pattern 1)))
-        (t pattern)))
+(defun helm-ag--add-header-for-carat (pattern &optional helm-buf)
+  (cond
+   ((string-match-p "\\`\\(?:\\^\\|\\$\\|\\)\\'" pattern)
+    nil)
+   ((and helm-buf (string-match "\\`\\^\\(.*\\)\\'" pattern))
+    (concat "^[^:]+:[0-9]+:" (match-string 1 pattern)))
+   (t pattern)))
 
 ;;;###autoload
 (defun helm-ag-pop-stack ()
@@ -1359,7 +1362,7 @@ FACE."
            (helm-ag--plist-map #'helm-ag--filter-helm-patterns regexp)))
         (pos-reg (helm-ag--join-regexps (plist-get reg-list :positive)))
         (neg-reg (helm-ag--join-regexps (plist-get reg-list :negative))))
-    (unless (string= "" pos-reg)
+    (unless (string-empty-p pos-reg)
       (save-excursion
         (goto-char beg)
         (cl-loop
@@ -1611,15 +1614,8 @@ advices, buffers, or hooks leak from the preview."
      (let ((helm-fuzzy-matching-highlight-fn #'identity))
        (unwind-protect (progn ,@body)
          (when (= helm-exit-status 0)
-           ;; move match to center, and move point in front of match, if succeeded
-           (helm-ag--recenter)
-           (unless (string= helm-ag--last-query "")
-             (let ((orig-pt (point))
-                   (back-reg
-                    (helm-ag--pcre-to-elisp-regexp
-                     (helm-ag--join-patterns helm-pattern))))
-               (end-of-line)
-               (unless (re-search-backward back-reg nil t) (goto-char orig-pt)))))
+           ;; move match to center
+           (helm-ag--recenter))
          (helm-ag--teardown-advice)
          (helm-ag--delete-temporaries)))))
 
